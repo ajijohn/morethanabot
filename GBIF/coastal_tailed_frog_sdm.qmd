@@ -28,6 +28,8 @@ library(randomForest)
 #library(gbm)
 ```
 
+# Download GBIF Occurrence Data
+
 ```{r}
 # Get species key from GBIF
 name_data <- name_backbone(name = "Rana aurora")
@@ -43,6 +45,7 @@ occ_sf <- st_as_sf(occ_df, coords = c("decimalLongitude", "decimalLatitude"), cr
 # Save to a geopackage (optional)
 st_write(occ_sf, "rana_aurora_occurrences.gpkg", driver = "GPKG")
 ```
+# Download Environmental Variables
 
 ```{r}
 # Download WorldClim bioclimatic variables
@@ -56,6 +59,7 @@ bio_pnw <- crop(bio_vars, pnw_extent)
 writeRaster(bio_pnw, "pnw_bioclim.tif", overwrite = TRUE)
 ```
 
+# Generate Background (Pseudo-Absence) Points
 
 ```{r}
 # Generate 5000 random background points in PNW
@@ -66,6 +70,7 @@ bg_df <- as.data.frame(geom(bg_points), xy = TRUE)
 colnames(bg_df) <- c("longitude", "latitude")
 ```
 
+# Extract bioclimatic Variables
 
 ```{r}
 # Extract bioclimatic variables at presence locations
@@ -82,6 +87,8 @@ background_env$presence <- 0
 sdm_data <- rbind(presence_env, background_env)
 ```
 
+# Train SDM Models
+# Build a Random Forest Model
 
 ```{r}
 # Train Random Forest model
@@ -94,6 +101,8 @@ rf_pred <- predict(bio_pnw, rf_model, type = "prob")[, 2]
 rf_raster <- rast(rf_pred)
 plot(rf_raster, main = "Random Forest SDM for Rana aurora")
 ```
+
+#  Model Evaluation
 
 ```{r}
 # Split into training (70%) and testing (30%)
@@ -114,6 +123,7 @@ roc_curve <- roc(test_data$presence, test_pred)
 auc(roc_curve)  # Print AUC value
 ```
 
+# Save & Export Results
 
 ```{r}
 # Save raster outputs
