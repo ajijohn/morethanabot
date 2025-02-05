@@ -1,0 +1,132 @@
+---
+title: "Species Distribution Modeling of Rana aurora"
+author: "Your Name"
+date: today
+format: html
+execute:
+  echo: true
+  warning: false
+  message: false
+editor: 
+  markdown: 
+    wrap: 72
+---
+
+	•	Retrieve GBIF occurrence data for Rana aurora.
+	•	Download & preprocess environmental variables.
+	•	Generate background points.
+	•	Train species distribution models ((MaxEnt & )Random Forest).
+	•	Predict and evaluate habitat suitability.
+
+```{r}
+library(rgbif)
+library(sf)
+library(terra)
+library(dismo)
+#library(maxnet)
+library(randomForest)
+#library(gbm)
+```
+
+```{r}
+# Get species key from GBIF
+name_data <- name_backbone(name = "Rana aurora")
+species_key <- name_data$key
+
+# Download occurrences (filtering for records with coordinates)
+occ_data <- occ_search(taxonKey = species_key, hasCoordinate = TRUE, limit = 5000)
+
+# Convert to spatial format
+occ_df <- occ_data$data[, c("decimalLongitude", "decimalLatitude")]
+occ_sf <- st_as_sf(occ_df, coords = c("decimalLongitude", "decimalLatitude"), crs = 4326)
+
+# Save to a geopackage (optional)
+st_write(occ_sf, "rana_aurora_occurrences.gpkg", driver = "GPKG")
+```
+
+```{r}
+# Download WorldClim bioclimatic variables
+bio_vars <- rast(getData("worldclim", var = "bio", res = 2.5))  # 2.5 arc-min resolution
+
+# Crop to PNW region
+pnw_extent <- ext(-130, -115, 40, 55)  # Approximate PNW bounding box
+bio_pnw <- crop(bio_vars, pnw_extent)
+
+# Save cropped raster (optional)
+writeRaster(bio_pnw, "pnw_bioclim.tif", overwrite = TRUE)
+```
+
+
+```{r}
+# Generate 5000 random background points in PNW
+bg_points <- spatSample(bio_pnw[[1]], size = 5000, method = "random", na.rm = TRUE, as.points = TRUE)
+
+# Convert to data frame
+bg_df <- as.data.frame(geom(bg_points), xy = TRUE)
+colnames(bg_df) <- c("longitude", "latitude")
+```
+
+
+```{r}
+# Extract bioclimatic variables at presence locations
+presence_env <- extract(bio_pnw, vect(occ_sf))
+
+# Extract at background locations
+background_env <- extract(bio_pnw, vect(bg_points))
+
+# Add response variable (1 = presence, 0 = background)
+presence_env$presence <- 1
+background_env$presence <- 0
+
+# Merge into a dataset for modeling
+sdm_data <- rbind(presence_env, background_env)
+```
+
+
+```{r}
+# Train Random Forest model
+rf_model <- randomForest(presence ~ ., data = sdm_data, ntree = 500, importance = TRUE)
+
+# Predict habitat suitability
+rf_pred <- predict(bio_pnw, rf_model, type = "prob")[, 2]
+
+# Convert to raster
+rf_raster <- rast(rf_pred)
+plot(rf_raster, main = "Random Forest SDM for Rana aurora")
+```
+
+```{r}
+# Split into training (70%) and testing (30%)
+set.seed(42)
+train_idx <- sample(1:nrow(sdm_data), size = 0.7 * nrow(sdm_data))
+train_data <- sdm_data[train_idx, ]
+test_data <- sdm_data[-train_idx, ]
+
+# Train model on training data
+rf_model_eval <- randomForest(presence ~ ., data = train_data, ntree = 500)
+
+# Predict on test set
+test_pred <- predict(rf_model_eval, test_data, type = "prob")[, 2]
+
+# Compute AUC
+library(pROC)
+roc_curve <- roc(test_data$presence, test_pred)
+auc(roc_curve)  # Print AUC value
+```
+
+
+```{r}
+# Save raster outputs
+writeRaster(prediction, "maxent_suitability.tif", overwrite = TRUE)
+writeRaster(rf_raster, "rf_suitability.tif", overwrite = TRUE)
+
+# Save models for future use
+saveRDS(maxent_model, "maxent_model.rds")
+saveRDS(rf_model, "rf_model.rds")
+```
+
+
+```{r}
+
+```
+
